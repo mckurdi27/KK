@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PocketBook Tarzı PDF Flipbook</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #1a1a1a;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+    perspective: 2000px; /* 3D flip efekti için */
+  }
+
+  h1 { font-size: 16px; margin-bottom: 12px; opacity: 0.7; }
+
+  input[type="file"] {
+    margin-bottom: 16px;
+    color: #ccc;
+  }
+
+  /* Kitap sahnesi */
+  #book {
+    position: relative;
+    width: 320px;
+    height: 450px;
+    transform-style: preserve-3d;
+    transition: transform 0.6s ease;
+  }
+
+  /* Her sayfa: render edilmiş bir Bitmap (canvas) */
+  .page {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    backface-visibility: hidden;
+    transform-origin: left center;
+    transition: transform 0.7s cubic-bezier(0.25, 0.8, 0.4, 1);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    background: #fff;
+  }
+
+  .page canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* Çevrilmiş sayfa */
+  .page.flipped {
+    transform: rotateY(-180deg);
+  }
+
+  /* Kontroller */
+  .controls {
+    margin-top: 20px;
+    display: flex;
+    gap: 12px;
+  }
+
+  button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    background: #3a7afe;
+    color: white;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  button:hover { background: #2a5fd0; }
+  button:disabled { background: #444; cursor: not-allowed; }
+
+  #info {
+    margin-top: 10px;
+    font-size: 13px;
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+
+<h1>📖 PDF → Bitmap → Flipbook (PocketBook mantığı)</h1>
+
+<input type="file" id="pdfInput" accept="application/pdf" />
+
+<div id="book"></div>
+
+<div class="controls">
+  <button id="prevBtn">◀ Önceki</button>
+  <button id="nextBtn">Sonraki ▶</button>
+</div>
+
+<div id="info">Bir PDF yükleyin…</div>
+
+<!-- PDF.js: PDF'yi Bitmap'e çeviren "sistem katmanı" -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+/* ============================================================
+   1. KATMAN: RENDER (Sistem PdfRenderer muadili)
+   PDF.js her sayfayı bir canvas'a (Bitmap) çizer.
+   ============================================================ */
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const bookEl  = document.getElementById('book');
+const infoEl  = document.getElementById('info');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+
+let pages      = [];   // Her eleman bir canvas (Bitmap)
+let currentIdx = 0;    // Şu an açık olan sayfa
+let total      = 0;
+
+// Sabit render ölçeği (PocketBook'un render çözünürlüğü gibi)
+const RENDER_SCALE = 1.5;
+
+async function loadPDF(file) {
+  const buffer = await file.arrayBuffer();
+  const pdf    = await pdfjsLib.getDocument({ data: buffer }).promise;
+  total = pdf.numPages;
+
+  bookEl.innerHTML = '';
+  pages = [];
+
+  infoEl.textContent = `Render ediliyor… 0 / ${total}`;
+
+  // Her sayfayı tek tek canvas'a (Bitmap) çevir
+  for (let i = 1; i <= total; i++) {
+    const page     = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: RENDER_SCALE });
+
+    const canvas  = document.createElement('canvas');
+    canvas.width  = viewport.width;
+    canvas.height = viewport.height;
+
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    // Her canvas'ı bir .page sarmalayıcısına koy
+    const pageEl = document.createElement('div');
+    pageEl.className = 'page';
+    pageEl.appendChild(canvas);
+    // Z-index: ilk sayfa en üstte
+    pageEl.style.zIndex = total - i;
+    bookEl.appendChild(pageEl);
+
+    pages.push(pageEl);
+    infoEl.textContent = `Render ediliyor… ${i} / ${total}`;
+  }
+
+  currentIdx = 0;
+  updateInfo();
+  updateButtons();
+}
+
+/* ============================================================
+   2. KATMAN: ANİMASYON (PocketBook'un flipbook katmanı)
+   Render edilmiş canvas'lar CSS transform ile döndürülür.
+   ============================================================ */
+
+function goNext() {
+  if (currentIdx >= total - 1) return;
+  pages[currentIdx].classList.add('flipped'); // sayfayı çevir
+  currentIdx++;
+  updateInfo();
+  updateButtons();
+}
+
+function goPrev() {
+  if (currentIdx <= 0) return;
+  currentIdx--;
+  pages[currentIdx].classList.remove('flipped');
+  updateInfo();
+  updateButtons();
+}
+
+function updateInfo() {
+  if (total > 0) {
+    infoEl.textContent = `Sayfa ${currentIdx + 1} / ${total}  —  (render + CSS animasyon)`;
+  }
+}
+
+function updateButtons() {
+  prevBtn.disabled = currentIdx <= 0;
+  nextBtn.disabled = currentIdx >= total - 1;
+}
+
+/* ============================================================
+   Olay dinleyicileri
+   ============================================================ */
+
+document.getElementById('pdfInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) loadPDF(file);
+});
+
+prevBtn.addEventListener('click', goPrev);
+nextBtn.addEventListener('click', goNext);
+
+// Klavye ile geçiş
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') goNext();
+  if (e.key === 'ArrowLeft')  goPrev();
+});
+</script>
+
+</body>
+</html>
