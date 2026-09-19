@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Flipbook - Çift Sayfa</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #2c3e50;
+    font-family: sans-serif;
+  }
+
+  #book-area {
+    position: fixed;
+    top: 50px;
+    bottom: 60px;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    z-index: 1;
+  }
+
+  #rtl-wrapper {
+    transform-origin: center center;
+    transition: transform 0.2s;
+    will-change: transform;
+  }
+  #rtl-wrapper.rtl-mode {
+    transform: scaleX(-1);
+  }
+  #rtl-wrapper.rtl-mode .page {
+    transform: scaleX(-1);
+  }
+
+  #book-container {
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+
+  .page { background: white; }
+  .page canvas { display: block; width: 100%; height: 100%; }
+  .page .loading-page {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; background: #ecf0f1; color: #7f8c8d;
+    font-size: 14px;
+  }
+
+  .stf__outerShadow,
+  .stf__innerShadow,
+  .stf__hardShadow,
+  .stf__block > canvas,
+  .stf__parent > canvas,
+  div[class*="stf__shadow"],
+  div[class*="stf__progress"],
+  .stf__loader {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+  .stf__item { filter: none !important; }
+  .stf__item::before,
+  .stf__item::after { display: none !important; }
+
+  #top-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 50px;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    z-index: 2147483647;
+  }
+  #top-bar input[type="file"] {
+    color: white;
+    background: rgba(255,255,255,0.15);
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.2);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #top-bar button {
+    background: #e67e22; color: white; border: none;
+    padding: 7px 16px; border-radius: 6px;
+    cursor: pointer; font-size: 13px;
+    min-width: 70px;
+  }
+  #top-bar button:hover { background: #d35400; }
+  #top-bar button.active { background: #27ae60; }
+  #view-btn { background: #8e44ad; }
+  #view-btn:hover { background: #7d3c98; }
+
+  #bottom-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 60px;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    z-index: 2147483647;
+  }
+  #bottom-bar button {
+    background: rgba(255,255,255,0.15);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.2);
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #bottom-bar button:hover:not(:disabled) {
+    background: rgba(255,255,255,0.25);
+  }
+  #bottom-bar button:disabled {
+    opacity: 0.35; cursor: not-allowed;
+  }
+
+  #page-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 12px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 6px;
+    min-width: 90px;
+  }
+  #page-input {
+    width: 42px;
+    text-align: center;
+    background: transparent;
+    border: none;
+    color: white;
+    font-family: monospace;
+    font-size: 14px;
+    font-weight: bold;
+    outline: none;
+    padding: 4px 0;
+  }
+  #page-input:focus {
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+  }
+  #page-total {
+    color: #aaa;
+    font-family: monospace;
+    font-size: 14px;
+    user-select: none;
+  }
+
+  .loading {
+    color: white; font-size: 16px;
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2147483647;
+    background: rgba(0,0,0,0.9);
+    padding: 14px 28px; border-radius: 8px;
+  }
+
+  #status {
+    position: fixed;
+    bottom: 68px; left: 50%;
+    transform: translateX(-50%);
+    color: #ccc; font-size: 12px;
+    background: rgba(0,0,0,0.6);
+    padding: 4px 12px;
+    border-radius: 4px;
+    z-index: 2147483647;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading" style="display:none;">PDF yükleyin…</div>
+
+<div id="book-area">
+  <div id="rtl-wrapper">
+    <div id="book-container"></div>
+  </div>
+</div>
+
+<div id="top-bar">
+  <input type="file" id="pdf-upload" accept="application/pdf">
+  <button id="rtl-btn">⇄ RTL</button>
+  <button id="view-btn" class="active">Çift</button>
+</div>
+
+<div id="bottom-bar">
+  <button id="first-btn">⏮ Baş</button>
+  <button id="prev-btn">◀ Geri</button>
+  <div id="page-indicator">
+    <input type="text" id="page-input" inputmode="numeric" value="—">
+    <span id="page-total"> / —</span>
+  </div>
+  <button id="next-btn">İleri ▶</button>
+  <button id="last-btn">Son ⏭</button>
+</div>
+
+<div id="status">Hazır</div>
+
+<script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const rtlWrapper = document.getElementById('rtl-wrapper');
+  const bookContainer = document.getElementById('book-container');
+  const pdfUpload = document.getElementById('pdf-upload');
+  const loadingDiv = document.getElementById('loading');
+  const statusDiv = document.getElementById('status');
+  const rtlBtn = document.getElementById('rtl-btn');
+  const viewBtn = document.getElementById('view-btn');
+
+  const firstBtn = document.getElementById('first-btn');
+  const prevBtn = document.getElementById('prev-btn');
+  const nextBtn = document.getElementById('next-btn');
+  const lastBtn = document.getElementById('last-btn');
+
+  const pageInput = document.getElementById('page-input');
+  const pageTotal = document.getElementById('page-total');
+
+  let isRTL = false;
+  let isSinglePage = false;   /* ← ÇİFT modda başlar */
+  let pageFlip = null;
+  let pdfDoc = null;
+  let pdfAspect = 1;
+  let pageSize = { width: 400, height: 600 };
+  let currentFile = null;
+  let pageDivs = [];
+  let pagesRendered = {};
+  let firstBatchSize = 10;
+  let totalPages = 0;
+  let resizeLocked = false;
+
+  /* ============================================================
+     SAYFA BOYUTU
+     Tek mod: tam pencere genişliği
+     Çift mod: yarım pencere genişliği
+     ============================================================ */
+  function calculatePageSize(aspect) {
+    const winW = window.innerWidth;
+    const winH = window.innerHeight;
+    const paddingH = 140;
+    const paddingW = 60;
+
+    const availW = winW - paddingW;
+    const availH = winH - paddingH;
+
+    const widthDivisor = isSinglePage ? 1 : 2;
+    const maxPageW = availW / widthDivisor;
+    const maxPageH = availH;
+
+    let pageH = maxPageH;
+    let pageW = pageH * aspect;
+    if (pageW > maxPageW) {
+      pageW = maxPageW;
+      pageH = pageW / aspect;
+    }
+    return { width: Math.floor(pageW), height: Math.floor(pageH) };
+  }
+
+  async function renderPage(pageNum, pageDiv) {
+    if (pagesRendered[pageNum]) return;
+    pagesRendered[pageNum] = true;
+    try {
+      const page = await pdfDoc.getPage(pageNum);
+      const vp = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = vp.width;
+      canvas.height = vp.height;
+      await page.render({
+        canvasContext: canvas.getContext('2d'),
+        viewport: vp
+      }).promise;
+      pageDiv.innerHTML = '';
+      pageDiv.appendChild(canvas);
+    } catch (err) {
+      console.error(`Sayfa ${pageNum}:`, err);
+      pageDiv.innerHTML = '<div class="loading-page">Hata</div>';
+    }
+  }
+
+  async function renderRemainingPages(startNum, endNum) {
+    for (let i = startNum; i <= endNum; i++) {
+      if (pageDivs[i - 1]) {
+        await renderPage(i, pageDivs[i - 1]);
+        statusDiv.textContent = `Yükleniyor: ${i} / ${totalPages}`;
+      }
+      await new Promise(r => setTimeout(r, 10));
+    }
+    statusDiv.textContent = `Hazır — ${totalPages} sayfa`;
+  }
+
+  async function loadPDF(file) {
+    currentFile = file;
+    loadingDiv.style.display = 'block';
+    loadingDiv.textContent = 'PDF işleniyor…';
+    bookContainer.innerHTML = '';
+    pageDivs = [];
+    pagesRendered = {};
+
+    if (pageFlip) {
+      try { pageFlip.destroy(); } catch(e) {}
+      pageFlip = null;
+    }
+
+    const buf = await file.arrayBuffer();
+    pdfDoc = await pdfjsLib.getDocument(buf).promise;
+    totalPages = pdfDoc.numPages;
+
+    const fp = await pdfDoc.getPage(1);
+    const vp = fp.getViewport({ scale: 1.0 });
+    pdfAspect = vp.width / vp.height;
+    pageSize = calculatePageSize(pdfAspect);
+
+    for (let i = 1; i <= totalPages; i++) {
+      const div = document.createElement('div');
+      div.className = 'page';
+      div.style.width = pageSize.width + 'px';
+      div.style.height = pageSize.height + 'px';
+      div.innerHTML = '<div class="loading-page">Yükleniyor…</div>';
+      pageDivs.push(div);
+    }
+
+    /* ============================================================
+       KRİTİK AYARLAR
+
+       Tek mod:
+         usePortrait: true   → her sayfa TEK, ortada
+         showCover: false    → kapak özel değil, her sayfa eşit
+
+       Çift mod:
+         usePortrait: false  → sayfalar yan yana (spread)
+         showCover: true     → kapak TEK, sonra spread
+       ============================================================ */
+    const settings = {
+      width: pageSize.width,
+      height: pageSize.height,
+      size: 'fixed',
+      drawShadow: false,
+      flippingTime: 700,
+      maxShadowOpacity: 0,
+      // TEK mod: kapak özel değil (her sayfa tek)
+      // ÇİFT mod: kapak tek, sonra spread
+      showCover: isSinglePage ? false : true,
+      mobileScrollSupport: false,
+      useMouseEvents: true,
+      swipeDistance: 30,
+      clickEventForward: true,
+      // TEK mod: true (her sayfa tek)
+      // ÇİFT mod: false (yan yana)
+      usePortrait: isSinglePage ? true : false,
+      startZIndex: 0,
+      autoSize: false,
+      showPageCorners: false,
+      disableFlipByClick: false
+    };
+
+    pageFlip = new St.PageFlip(bookContainer, settings);
+    pageFlip.loadFromHTML(pageDivs);
+
+    pageFlip.on('flip', (e) => updatePageIndicator(e.data));
+    pageFlip.on('changeState', () => updateButtonStates());
+
+    const firstEnd = Math.min(firstBatchSize, totalPages);
+    for (let i = 1; i <= firstEnd; i++) {
+      loadingDiv.textContent = `Sayfa ${i} / ${totalPages}`;
+      await renderPage(i, pageDivs[i - 1]);
+    }
+
+    loadingDiv.style.display = 'none';
+    statusDiv.textContent = `İlk ${firstEnd} sayfa hazır — ${isSinglePage ? 'Tek' : 'Çift'}`;
+
+    if (totalPages > firstBatchSize) {
+      renderRemainingPages(firstBatchSize + 1, totalPages);
+    }
+
+    updatePageIndicator(0);
+    updateButtonStates();
+    applyRTLClass();
+    updateViewButton();
+  }
+
+  function updatePageIndicator(pageIndex) {
+    pageInput.value = pageIndex + 1;
+    pageTotal.textContent = ` / ${totalPages}`;
+  }
+
+  function updateButtonStates() {
+    if (!pageFlip) {
+      firstBtn.disabled = prevBtn.disabled = nextBtn.disabled = lastBtn.disabled = true;
+      return;
+    }
+    const c = pageFlip.getCurrentPageIndex();
+    firstBtn.disabled = c === 0;
+    prevBtn.disabled = c === 0;
+    nextBtn.disabled = c >= totalPages - 1;
+    lastBtn.disabled = c >= totalPages - 1;
+  }
+
+  function updateViewButton() {
+    viewBtn.textContent = isSinglePage ? 'Tek' : 'Çift';
+    viewBtn.classList.toggle('active', !isSinglePage);
+  }
+
+  firstBtn.addEventListener('click', () => pageFlip && pageFlip.flip(0));
+  prevBtn.addEventListener('click', () => pageFlip && pageFlip.flipPrev());
+  nextBtn.addEventListener('click', () => pageFlip && pageFlip.flipNext());
+  lastBtn.addEventListener('click', () => pageFlip && pageFlip.flip(totalPages - 1));
+
+  /* ============================================================
+     TEK/ÇİFT BUTONU
+     ============================================================ */
+  viewBtn.addEventListener('click', () => {
+    isSinglePage = !isSinglePage;
+    updateViewButton();
+
+    if (currentFile) {
+      const savedPage = pageFlip ? pageFlip.getCurrentPageIndex() : 0;
+      resizeLocked = true;
+      loadPDF(currentFile).then(() => {
+        if (pageFlip && savedPage > 0 && savedPage < totalPages) {
+          setTimeout(() => {
+            try {
+              if (typeof pageFlip.turnToPage === 'function') {
+                pageFlip.turnToPage(savedPage);
+              } else {
+                pageFlip.flip(savedPage);
+              }
+            } catch(e) {}
+          }, 250);
+        }
+        setTimeout(() => { resizeLocked = false; }, 400);
+      });
+    }
+  });
+
+  /* ============================================================
+     SAYFA NUMARASINA GİT
+     ============================================================ */
+  pageInput.addEventListener('focus', () => {
+    pageInput.select();
+  });
+
+  pageInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const target = parseInt(pageInput.value, 10);
+
+    if (isNaN(target) || target < 1 || target > totalPages) {
+      updatePageIndicator(pageFlip ? pageFlip.getCurrentPageIndex() : 0);
+      pageInput.blur();
+      return;
+    }
+
+    pageInput.blur();
+    resizeLocked = true;
+
+    setTimeout(() => {
+      if (pageFlip) {
+        const current = pageFlip.getCurrentPageIndex();
+        const diff = Math.abs(target - 1 - current);
+        try {
+          if (diff <= 2) {
+            pageFlip.flip(target - 1);
+          } else if (typeof pageFlip.turnToPage === 'function') {
+            pageFlip.turnToPage(target - 1);
+          } else {
+            pageFlip.flip(target - 1);
+          }
+        } catch (err) {
+          console.error('Flip hatası:', err);
+        }
+      }
+      setTimeout(() => { resizeLocked = false; }, 300);
+    }, 100);
+  });
+
+  pageInput.addEventListener('blur', () => {
+    resizeLocked = true;
+    setTimeout(() => { resizeLocked = false; }, 300);
+  });
+
+  /* ============================================================
+     RTL
+     ============================================================ */
+  function applyRTLClass() {
+    rtlWrapper.classList.toggle('rtl-mode', isRTL);
+  }
+
+  rtlBtn.addEventListener('click', () => {
+    isRTL = !isRTL;
+    rtlBtn.classList.toggle('active', isRTL);
+    applyRTLClass();
+    statusDiv.textContent = isRTL ? 'RTL — sağdan sola' : 'LTR — soldan sağa';
+  });
+
+  /* ============================================================
+     KLAVYE
+     ============================================================ */
+  document.addEventListener('keydown', (e) => {
+    if (!pageFlip) return;
+    if (document.activeElement === pageInput) return;
+
+    if (e.key === 'ArrowLeft') isRTL ? nextBtn.click() : prevBtn.click();
+    if (e.key === 'ArrowRight') isRTL ? prevBtn.click() : nextBtn.click();
+    if (e.key === 'Home') firstBtn.click();
+    if (e.key === 'End') lastBtn.click();
+  });
+
+  /* ============================================================
+     RESIZE
+     ============================================================ */
+  let resizeTimer = null;
+  let lastWidth = window.innerWidth;
+  let lastHeight = window.innerHeight;
+
+  window.addEventListener('resize', () => {
+    if (resizeLocked) {
+      lastWidth = window.innerWidth;
+      lastHeight = window.innerHeight;
+      return;
+    }
+
+    const newWidth = window.innerWidth;
+    const newHeight = window.innerHeight;
+
+    if (Math.abs(newWidth - lastWidth) < 10) {
+      lastHeight = newHeight;
+      return;
+    }
+
+    lastWidth = newWidth;
+    lastHeight = newHeight;
+
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (currentFile && !resizeLocked) {
+        loadPDF(currentFile);
+      }
+    }, 500);
+  });
+
+  pdfUpload.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) loadPDF(file);
+  });
+</script>
+</body>
+</html>
